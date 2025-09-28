@@ -6,16 +6,12 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sys/epoll.h>
 
 #define PORT 8080
 #define BUFF_SIZE 10000
 #define MAX_ACCEPT_BACKLOG 5
-
-// struct sockaddr_in {
-//     sa_family_t     sin_family;     /* AF_INET */
-//     in_port_t       sin_port;       /* Port number */
-//     struct in_addr  sin_addr;       /* IPv4 address */
-// };
+#define MAX_EPOLL_EVENTS 10
 
 // Function to reverse a string in-place
 void strrev(char *str) {
@@ -53,40 +49,67 @@ int main () {
     struct sockaddr_in client_addr;
     socklen_t client_addr_len;
 
+    // create an epoll instance
+    int epoll_fd = epoll_create1(0);
+
+    struct epoll_event event, events[MAX_EPOLL_EVENTS];
+
+    event.events = EPOLLIN;
+    event.data.fd = listen_sock_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, listen_sock_fd, &event);
+
+    char buff[BUFF_SIZE];
+    memset(buff, 0, BUFF_SIZE);
     
     while (1) {
-        // Accept client connection
-        int conn_sock_fd = accept(listen_sock_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-        printf("[INFO] Client connected to server\n");
+        printf("[DEBUG] Epoll wait\n");
 
-        while (1) {
-            // Create buffer to store client message
-            char buff[BUFF_SIZE];
-            memset(buff, 0, BUFF_SIZE);
+        // wait for events
+        int n_ready_fds = epoll_wait(epoll_fd, events, MAX_EPOLL_EVENTS, -1);
 
-            // Read message from client to buffer
-            ssize_t read_n = recv(conn_sock_fd, buff, sizeof(buff), 0);
+        for (int i=0; i<n_ready_fds; i++) {
+            int curr_fd = events[i].data.fd;
 
-            // Client closed connection or error occurred
-            if (read_n < 0) {
-                printf("[INFO] Error occured. Closing server\n");
-                close(conn_sock_fd);
-                exit(1);
+            /* accept client connection and add to epoll */
+            if (curr_fd == listen_sock_fd) {
+                // event on listening socket
+
+                /* accept connection */
+                int new_conn_fd = accept(listen_sock_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+                
+                /* add client socket to epoll */
+                event.events = EPOLLIN;
+                event.data.fd = new_conn_fd;
+                epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_conn_fd, &event);
+
+                printf("[INFO] New client connected to server\n");
+            } else {
+                // event on connection socket
+
+                /* read message from client */
+                ssize_t read_n = recv(curr_fd, buff, sizeof(buff), 0);
+                if (read_n < 0) {
+                    printf("[INFO] Error occured. Closing server\n");
+                    close(curr_fd);
+                    exit(1);
+                }
+                else if (read_n == 0) {
+                    printf("[INFO] Client Disconnected. Closing connection\n");
+                    close(curr_fd);
+                    break;
+                }
+
+                // Print message from client
+                printf("[CLIENT MESSAGE] %s", buff);
+
+                /* reverse message */
+                strrev(buff);
+
+                /* send reversed message to client */
+                send(curr_fd, buff, read_n, 0);
+
+                memset(buff, 0, BUFF_SIZE);
             }
-            else if (read_n == 0) {
-                printf("[INFO] Client Disconnected. Closing connection\n");
-                close(conn_sock_fd);
-                break;
-            }
-
-            // Print message from client
-            printf("[CLIENT MESSAGE] %s", buff);
-
-            // Sting reverse
-            strrev(buff);
-
-            // Sending reversed string to client
-            send(conn_sock_fd, buff, read_n, 0);
         }
     }
     
