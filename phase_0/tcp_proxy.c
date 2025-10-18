@@ -271,7 +271,7 @@ void loop_run(int epoll_fd) {
 }
 
 int main () {
-    // Creating listening sock
+    // Creating listening socket
     listen_sock_fd = create_server();
 
     // create an epoll instance
