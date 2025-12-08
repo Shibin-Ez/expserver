@@ -8,10 +8,10 @@ struct xps_connection_s {
   int sock_fd;
   xps_listener_t *listener;
   char *remote_ip;
+  xps_buffer_list_t *write_buff_list;
 };
 
 xps_connection_t *xps_connection_create(xps_core_t *core, int sock_fd);
 void xps_connection_destroy(xps_connection_t *connection);
-// void xps_connection_read_handler(xps_connection_t *connection);
 
 #endif

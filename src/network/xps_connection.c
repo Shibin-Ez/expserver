@@ -1,7 +1,12 @@
 #include "xps_connection.h"
+#include <asm-generic/errno-base.h>
+#include <asm-generic/errno.h>
+#include <assert.h>
 
 // Function declaration for read callback of listener
 void connection_loop_read_handler(void *ptr);
+void connection_loop_write_handler(void *ptr);
+void connection_loop_close_handler(void *ptr);
 
 xps_connection_t *xps_connection_create(xps_core_t *core, int sock_fd) {
 
@@ -13,13 +18,16 @@ xps_connection_t *xps_connection_create(xps_core_t *core, int sock_fd) {
   }
 
   /* attach sock_fd to epoll */
-  xps_loop_attach(core->loop, sock_fd, EPOLLIN, connection, connection_loop_read_handler);
+  xps_loop_attach(core->loop, sock_fd, EPOLLIN | EPOLLOUT, connection,
+                  connection_loop_read_handler, connection_loop_write_handler,
+                  connection_loop_close_handler);
 
   // Init values
   connection->core = core;
   connection->sock_fd = sock_fd;
   connection->listener = NULL;
   connection->remote_ip = get_remote_ip(sock_fd);
+  connection->write_buff_list = xps_buffer_list_create();
 
   /* add connection to 'connections' list */
   vec_push(&core->connections, connection);
@@ -101,20 +109,51 @@ void connection_loop_read_handler(void *ptr) {
   /* reverse client message */
   connection_strrev(buff);
 
-  // Sending reversed message to client
-  long bytes_written = 0;
-  long message_len = read_n;
-  while (bytes_written < message_len) {
+  xps_buffer_t *write_buff = xps_buffer_create(read_n, read_n + 1, NULL);
+  memcpy(write_buff->data, buff, read_n);
+  xps_buffer_list_append(connection->write_buff_list, write_buff);
 
-    /* send message using send() */
-    long write_n = send(connection->sock_fd, buff + bytes_written,
-                        message_len - bytes_written, 0);
-    if (write_n < 0) {
-      logger(LOG_ERROR, "xps_connection_read_handler()", "send() failed");
+  // Sending reversed message to client
+  connection_loop_write_handler(connection);
+}
+
+void connection_loop_write_handler(void *ptr) {
+  assert(ptr != NULL);
+
+  xps_connection_t *connection = ptr;
+
+  if (connection->write_buff_list->len == 0)
+    return;
+
+  long bytes_written = 0;
+  long message_len = connection->write_buff_list->len;
+
+  xps_buffer_t *buff =
+      xps_buffer_list_read(connection->write_buff_list, message_len);
+
+  /* send message using send() */
+  long write_n = send(connection->sock_fd, buff->data, buff->len, 0);
+  if (write_n > 0) {
+    // clear written buffers from buffer list
+    xps_buffer_list_clear(connection->write_buff_list, write_n);
+  } else if (write_n < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      // xps_buffer_destroy(buff);
+      return;
+    } else {
+      logger(LOG_ERROR, "xps_connection_write_handler()", "send() failed");
       perror("Error message");
       xps_connection_destroy(connection);
       return;
     }
-    bytes_written += write_n;
   }
+}
+
+void connection_loop_close_handler(void *ptr) {
+  assert(ptr != NULL);
+
+  xps_connection_t *connection = ptr;
+
+  logger(LOG_INFO, "xps_connection_close_handler", "peer closed connection");
+  xps_connection_destroy(connection);
 }

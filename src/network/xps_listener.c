@@ -1,4 +1,5 @@
 #include "xps_listener.h"
+#include <fcntl.h>
 
 // Function declaration for read callback of listener
 void listener_connection_handler(void *ptr);
@@ -69,7 +70,8 @@ xps_listener_t *xps_listener_create(xps_core_t *core, const char *host,
   listener->sock_fd = sock_fd;
 
   // Attach listener to loop
-  xps_loop_attach(core->loop, sock_fd, EPOLLIN, listener, listener_connection_handler);
+  xps_loop_attach(core->loop, sock_fd, EPOLLIN, listener,
+                  listener_connection_handler, NULL, NULL);
 
   // Add listener to global listeners list
   vec_push(&core->listeners, listener);
@@ -121,6 +123,11 @@ void listener_connection_handler(void *ptr) {
   if (conn_sock_fd < 0) {
     logger(LOG_ERROR, "xps_listener_connection_handler()", "accept() failed");
     perror("Error message");
+    return;
+  }
+
+  // Make the socket non-blocking
+  if (make_socket_non_blocking(conn_sock_fd) != OK) {
     return;
   }
 

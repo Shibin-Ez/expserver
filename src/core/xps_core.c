@@ -59,13 +59,14 @@ void xps_core_destroy(xps_core_t *core) {
 void xps_core_start(xps_core_t *core) {
 
   /* validate params */
-  assert (core != NULL);
+  assert(core != NULL);
 
   logger(LOG_DEBUG, "xps_start()", "starting core");
 
   /* create listeners from port 8001 to 8004 */
   for (u_int port = 8001; port <= 8004; port++) {
-    xps_listener_create(core, "127.0.0.1", port);
+    xps_listener_t *listener = xps_listener_create(core, "127.0.0.1", port);
+    if (listener != NULL) logger(LOG_INFO, "xps_start()", "Server listening on http://127.0.0.1:%d", port);
   }
 
   /* run loop instance using xps_loop_run() */

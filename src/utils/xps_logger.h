@@ -34,8 +34,15 @@
 #define BOLD_START "\033[1m"
 #define BOLD_END "\033[0m"
 
-typedef enum { LOG_ERROR, LOG_INFO, LOG_DEBUG, LOG_WARNING, LOG_HTTP } xps_log_level_t;
+typedef enum {
+  LOG_ERROR,
+  LOG_INFO,
+  LOG_DEBUG,
+  LOG_WARNING,
+  LOG_HTTP
+} xps_log_level_t;
 
-void logger(xps_log_level_t level, const char *function_name, const char *format_string, ...);
+void logger(xps_log_level_t level, const char *function_name,
+            const char *format_string, ...);
 
 #endif

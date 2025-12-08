@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <sys/epoll.h>
 
-loop_event_t *loop_event_create(u_int fd, void *ptr, xps_handler_t read_cb) {
+loop_event_t *loop_event_create(u_int fd, void *ptr, xps_handler_t read_cb,
+                                xps_handler_t write_cb,
+                                xps_handler_t close_cb) {
   assert(ptr != NULL);
 
   // Alloc memory for 'event' instance
@@ -15,6 +17,8 @@ loop_event_t *loop_event_create(u_int fd, void *ptr, xps_handler_t read_cb) {
   /* set fd, ptr, read_cb fields of event */
   event->fd = fd;
   event->read_cb = read_cb;
+  event->write_cb = write_cb;
+  event->close_cb = close_cb;
   event->ptr = ptr;
 
   logger(LOG_DEBUG, "event_create()", "created event");
@@ -99,11 +103,13 @@ void xps_loop_destroy(xps_loop_t *loop) {
  * @return : OK on success and E_FAIL on error
  */
 int xps_loop_attach(xps_loop_t *loop, u_int fd, int event_flags, void *ptr,
-                    xps_handler_t read_cb) {
+                    xps_handler_t read_cb, xps_handler_t write_cb,
+                    xps_handler_t close_cb) {
   assert(loop != NULL);
   assert(ptr != NULL);
 
-  loop_event_t *loop_event = loop_event_create(fd, ptr, read_cb);
+  loop_event_t *loop_event =
+      loop_event_create(fd, ptr, read_cb, write_cb, close_cb);
 
   if (loop_event == NULL) {
     return E_FAIL;
@@ -198,12 +204,28 @@ void xps_loop_run(xps_loop_t *loop) {
         continue;
       }
 
+      // Close event
+      if (curr_epoll_event.events & (EPOLLERR | EPOLLHUP)) {
+        logger(LOG_DEBUG, "handle_epoll_events()", "EVENT / close");
+        if (curr_event->close_cb != NULL)
+          // Pass the ptr from loop_event_t as a parameter to the callback
+          curr_event->close_cb(curr_event->ptr);
+      }
+
       // Read event
       if (curr_epoll_event.events & EPOLLIN) {
         logger(LOG_DEBUG, "handle_epoll_events()", "EVENT / read");
         if (curr_event->read_cb != NULL)
           // Pass the ptr from loop_event_t as a parameter to the callback
           curr_event->read_cb(curr_event->ptr);
+      }
+
+      // Write event
+      if (curr_epoll_event.events & EPOLLOUT) {
+        logger(LOG_DEBUG, "handle_epoll_events()", "EVENT / write");
+        if (curr_event->write_cb != NULL)
+          // Pass the ptr from loop_event_t as a parameter to the callback
+          curr_event->write_cb(curr_event->ptr);
       }
     }
   }
