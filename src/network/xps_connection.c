@@ -7,6 +7,8 @@
 void connection_loop_read_handler(void *ptr);
 void connection_loop_write_handler(void *ptr);
 void connection_loop_close_handler(void *ptr);
+void connection_read_handler(void *ptr);
+void connection_write_handler(void *ptr);
 
 xps_connection_t *xps_connection_create(xps_core_t *core, int sock_fd) {
 
@@ -18,7 +20,7 @@ xps_connection_t *xps_connection_create(xps_core_t *core, int sock_fd) {
   }
 
   /* attach sock_fd to epoll */
-  xps_loop_attach(core->loop, sock_fd, EPOLLIN | EPOLLOUT, connection,
+  xps_loop_attach(core->loop, sock_fd, EPOLLIN | EPOLLOUT | EPOLLET, connection,
                   connection_loop_read_handler, connection_loop_write_handler,
                   connection_loop_close_handler);
 
@@ -28,6 +30,9 @@ xps_connection_t *xps_connection_create(xps_core_t *core, int sock_fd) {
   connection->listener = NULL;
   connection->remote_ip = get_remote_ip(sock_fd);
   connection->write_buff_list = xps_buffer_list_create();
+  connection->read_ready = connection->write_ready = false;
+  connection->send_handler = connection_write_handler;
+  connection->recv_handler = connection_read_handler;
 
   /* add connection to 'connections' list */
   vec_push(&core->connections, connection);
@@ -75,7 +80,7 @@ void connection_strrev(char *str) {
 }
 
 // Function definition for read callback for connection
-void connection_loop_read_handler(void *ptr) {
+void connection_read_handler(void *ptr) {
 
   /* validate params */
   assert(ptr != NULL);
@@ -86,13 +91,18 @@ void connection_loop_read_handler(void *ptr) {
   memset(buff, 0, sizeof(buff));
 
   /* read data from client using recv() */
-  long read_n = recv(connection->sock_fd, buff, sizeof(buff), 0);
+  long read_n = recv(connection->sock_fd, buff, sizeof(buff) - 1, 0);
 
   if (read_n < 0) {
-    logger(LOG_ERROR, "xps_connection_read_handler()", "recv() failed");
-    perror("Error message");
-    xps_connection_destroy(connection);
-    return;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      connection->read_ready = false;
+      return;
+    } else {
+      logger(LOG_ERROR, "xps_connection_read_handler()", "recv() failed");
+      perror("Error message");
+      xps_connection_destroy(connection);
+      return;
+    }
   }
 
   if (read_n == 0) {
@@ -109,15 +119,29 @@ void connection_loop_read_handler(void *ptr) {
   /* reverse client message */
   connection_strrev(buff);
 
-  xps_buffer_t *write_buff = xps_buffer_create(read_n, read_n + 1, NULL);
+  xps_buffer_t *write_buff = xps_buffer_create(read_n, read_n, NULL);
+  if (write_buff == NULL) {
+    logger(LOG_ERROR, "connection_read_handler()",
+           "Failed to create write buffer");
+    xps_connection_destroy(connection);
+    return;
+  }
+
   memcpy(write_buff->data, buff, read_n);
-  xps_buffer_list_append(connection->write_buff_list, write_buff);
+  if (connection->write_buff_list) {
+    xps_buffer_list_append(connection->write_buff_list, write_buff);
+  } else {
+    logger(LOG_ERROR, "connection_read_handler()", "write_buff_list is NULL");
+    xps_buffer_destroy(write_buff);
+    xps_connection_destroy(connection);
+    return;
+  }
 
   // Sending reversed message to client
-  connection_loop_write_handler(connection);
+  connection_write_handler(connection);
 }
 
-void connection_loop_write_handler(void *ptr) {
+void connection_write_handler(void *ptr) {
   assert(ptr != NULL);
 
   xps_connection_t *connection = ptr;
@@ -138,7 +162,7 @@ void connection_loop_write_handler(void *ptr) {
     xps_buffer_list_clear(connection->write_buff_list, write_n);
   } else if (write_n < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      // xps_buffer_destroy(buff);
+      connection->write_ready = false;
       return;
     } else {
       logger(LOG_ERROR, "xps_connection_write_handler()", "send() failed");
@@ -156,4 +180,22 @@ void connection_loop_close_handler(void *ptr) {
 
   logger(LOG_INFO, "xps_connection_close_handler", "peer closed connection");
   xps_connection_destroy(connection);
+}
+
+void connection_loop_read_handler(void *ptr) {
+  assert(ptr != NULL);
+
+  xps_connection_t *connection = ptr;
+
+  /*set read_ready flag to true*/
+  connection->read_ready = true;
+}
+
+void connection_loop_write_handler(void *ptr) {
+  assert(ptr != NULL);
+
+  xps_connection_t *connection = ptr;
+
+  /*set read_ready flag to true*/
+  connection->write_ready = true;
 }
