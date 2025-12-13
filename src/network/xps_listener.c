@@ -1,5 +1,4 @@
 #include "xps_listener.h"
-#include <fcntl.h>
 
 // Function declaration for read callback of listener
 void listener_connection_handler(void *ptr);
@@ -118,29 +117,39 @@ void listener_connection_handler(void *ptr) {
   struct sockaddr conn_addr;
   socklen_t conn_addr_len = sizeof(conn_addr);
 
-  // Accepting connection
-  int conn_sock_fd = accept(listener->sock_fd, &conn_addr, &conn_addr_len);
-  if (conn_sock_fd < 0) {
-    logger(LOG_ERROR, "xps_listener_connection_handler()", "accept() failed");
-    perror("Error message");
-    return;
-  }
+  while (1) {
+    // Accepting connection
+    int conn_sock_fd = accept(listener->sock_fd, &conn_addr, &conn_addr_len);
+    if (conn_sock_fd < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        break;
+      }
+      logger(LOG_ERROR, "xps_listener_connection_handler()", "accept() failed");
+      perror("Error message");
+      return;
+    }
 
-  // Make the socket non-blocking
-  if (make_socket_non_blocking(conn_sock_fd) != OK) {
-    return;
-  }
+    // Make the socket non-blocking
+    if (make_socket_non_blocking(conn_sock_fd) != OK) {
+      close(conn_sock_fd);
+      return;
+    }
 
-  // Creating connection instance
-  xps_connection_t *client =
-      xps_connection_create(listener->core, conn_sock_fd);
-  if (client == NULL) {
-    logger(LOG_ERROR, "xps_listener_connection_handler()",
-           "xps_connection_create() failed");
-    close(conn_sock_fd);
-    return;
-  }
-  client->listener = listener;
+    // Creating connection instance
+    xps_connection_t *client =
+        xps_connection_create(listener->core, conn_sock_fd);
+    if (client == NULL) {
+      logger(LOG_ERROR, "xps_listener_connection_handler()",
+             "xps_connection_create() failed");
+      close(conn_sock_fd);
+      return;
+    }
+    client->listener = listener;
 
-  logger(LOG_INFO, "xps_listener_connection_handler()", "new connection");
+    // Create Pipe instance
+    xps_pipe_t *pipe = xps_pipe_create(listener->core, DEFAULT_PIPE_BUFFER_SIZE,
+                                       client->source, client->sink);
+
+    logger(LOG_INFO, "xps_listener_connection_handler()", "new connection");
+  }
 }

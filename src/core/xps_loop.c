@@ -1,8 +1,9 @@
 #include "xps_loop.h"
-#include <stdlib.h>
-#include <sys/epoll.h>
 
-bool handle_connections(xps_loop_t *loop);
+// bool handle_connections(xps_loop_t *loop);
+void handle_epoll_events(xps_loop_t *loop, int n_events);
+bool handle_pipes(xps_loop_t *loop);
+void filter_nulls(xps_core_t *core);
 
 loop_event_t *loop_event_create(u_int fd, void *ptr, xps_handler_t read_cb,
                                 xps_handler_t write_cb,
@@ -176,7 +177,7 @@ void xps_loop_run(xps_loop_t *loop) {
 
   while (1) {
 
-    bool has_ready_connections = handle_connections(loop);
+    bool has_ready_connections = handle_pipes(loop);
     int timeout = -1;
     if (has_ready_connections)
       timeout = 0;
@@ -186,88 +187,162 @@ void xps_loop_run(xps_loop_t *loop) {
                               MAX_EPOLL_EVENTS, timeout);
     logger(LOG_DEBUG, "xps_loop_run()", "epoll wait over");
 
-    logger(LOG_DEBUG, "xps_loop_run()", "handling %d events", n_events);
+    if (n_events < 0)
+      logger(LOG_ERROR, "xps_loop_run()", "epoll_wait() error");
 
-    // Handle events
-    for (int i = 0; i < n_events; i++) {
-      logger(LOG_DEBUG, "xps_loop_run()", "handling event no. %d", i + 1);
+    // Handle epoll events
+    if (n_events > 0)
+      handle_epoll_events(loop, n_events);
 
-      struct epoll_event curr_epoll_event = loop->epoll_events[i];
-      loop_event_t *curr_event = curr_epoll_event.data.ptr;
-
-      // Check if event still exists. Could have been destroyed due to prev
-      // event
-      int curr_event_idx = -1;
-      for (int i = 0; i < loop->events.length; i++) {
-        if (loop->events.data[i] == curr_event) {
-          curr_event_idx = i;
-          break;
-        }
-      }
-
-      // Above can be optimized using an RB tree
-
-      if (curr_event_idx == -1) {
-        logger(LOG_DEBUG, "handle_epoll_events()", "event not found. skipping");
-        continue;
-      }
-
-      // Close event
-      if (curr_epoll_event.events & (EPOLLERR | EPOLLHUP)) {
-        logger(LOG_DEBUG, "handle_epoll_events()", "EVENT / close");
-        if (curr_event->close_cb != NULL)
-          // Pass the ptr from loop_event_t as a parameter to the callback
-          curr_event->close_cb(curr_event->ptr);
-      }
-
-      // Read event
-      if (curr_epoll_event.events & EPOLLIN) {
-        logger(LOG_DEBUG, "handle_epoll_events()", "EVENT / read");
-        if (curr_event->read_cb != NULL)
-          // Pass the ptr from loop_event_t as a parameter to the callback
-          curr_event->read_cb(curr_event->ptr);
-      }
-
-      // Write event
-      if (curr_epoll_event.events & EPOLLOUT) {
-        logger(LOG_DEBUG, "handle_epoll_events()", "EVENT / write");
-        if (curr_event->write_cb != NULL)
-          // Pass the ptr from loop_event_t as a parameter to the callback
-          curr_event->write_cb(curr_event->ptr);
-      }
-    }
+    // Filter NULLs from vec lists
+    filter_nulls(loop->core);
   }
 }
 
-bool handle_connections(xps_loop_t *loop) {
-  /*iterate through all the connections*/
-  for (int i = 0; i < loop->core->connections.length; i++) {
-    xps_connection_t *connection = loop->core->connections.data[i];
+bool handle_pipes(xps_loop_t *loop) {
+  assert(loop != NULL);
 
-    if (connection && connection->read_ready == true)
-      connection->recv_handler(connection);
-
-    /* Connection might have been destroyed in recv_handler */
-    connection = loop->core->connections.data[i];
-
-    if (connection && connection->write_ready == true &&
-        connection->write_buff_list->len > 0)
-      connection->send_handler(connection);
-  }
-
-  for (int i = 0; i < loop->core->connections.length; i++) {
-    xps_connection_t *connection = loop->core->connections.data[i];
-
-    /*check if connection is NULL and continue if it is*/
-    if (connection == NULL)
+  for (int i = 0; i < loop->core->pipes.length; i++) {
+    xps_pipe_t *pipe = loop->core->pipes.data[i];
+    if (pipe == NULL)
       continue;
 
-    if (connection->read_ready == true)
-      return true;
+    /*Destroy the pipe if it has no source and sink and continue*/
+    if (pipe->source == NULL && pipe->sink == NULL) {
+      xps_pipe_destroy(pipe);
+      continue;
+    }
 
-    if (connection->write_ready == true && connection->write_buff_list->len > 0)
+    /*Pipe has source AND source is ready AND pipe is writable*/
+    if (pipe->source && pipe->source->ready == true &&
+        xps_pipe_is_writable(pipe)) {
+      // call connection_source_handler to write into  pipe
+      pipe->source->handler_cb(pipe->source);
+    }
+
+    /*Pipe has sink AND sink is ready AND pipe is readable*/
+    if (pipe->sink && pipe->sink->ready == true && xps_pipe_is_readable(pipe)) {
+      // call connection_sink_handler to read from pipe
+      pipe->sink->handler_cb(pipe->sink);
+    }
+
+    /*Pipe has source and no sink*/
+    if (pipe->source && pipe->sink == NULL) {
+      pipe->source->active = false;
+      pipe->source->close_cb(pipe->source);
+    }
+
+    /*Pipe has sink and no source and pipe is not readable*/
+    if (pipe->sink && pipe->source == NULL && !xps_pipe_is_readable(pipe)) {
+      pipe->sink->active = false;
+      pipe->sink->close_cb(pipe->sink);
+    }
+  }
+
+  for (int i = 0; i < loop->core->pipes.length; i++) {
+    xps_pipe_t *pipe = loop->core->pipes.data[i];
+    if (pipe == NULL) {
+      logger(LOG_DEBUG, "handle_pipes", "pipe is null");
+      continue;
+    }
+
+    /*Pipe has source AND source is ready AND pipe is writable*/
+    if (pipe->source && pipe->source->ready == true &&
+        xps_pipe_is_writable(pipe)) {
       return true;
+    }
+
+    /*Pipe has sink AND sink is ready AND pipe is readable*/
+    if (pipe->sink && pipe->sink->ready == true && xps_pipe_is_readable(pipe)) {
+      return true;
+    }
+
+    /*Pipe has source and no sink*/
+    if (pipe->source && pipe->sink == NULL) {
+      return true;
+    }
+
+    /*Pipe has sink and no source and pipe is not readable*/
+    if (pipe->sink && pipe->source == NULL && !xps_pipe_is_readable(pipe)) {
+      return true;
+    }
   }
 
   return false;
+}
+
+void filter_nulls(xps_core_t *core) {
+  /*check whether number of nulls in each of events, listeners, connections,
+     pipes list exceeds DEFAULT_NULLS_THRESH and filter nulls using
+     vec_filter_null() and set number of nulls in each list to 0*/
+
+  if (core->n_null_listeners > DEFAULT_NULLS_THRESH) {
+    vec_filter_null(&core->listeners);
+    core->n_null_listeners = 0;
+  }
+
+  if (core->n_null_connections > DEFAULT_NULLS_THRESH) {
+    vec_filter_null(&core->connections);
+    core->n_null_connections = 0;
+  }
+
+  if (core->n_null_pipes > DEFAULT_NULLS_THRESH) {
+    vec_filter_null(&core->pipes);
+    core->n_null_pipes = 0;
+  }
+}
+
+void handle_epoll_events(xps_loop_t *loop, int n_events) {
+  logger(LOG_DEBUG, "handle_epoll_events()", "handling %d events", n_events);
+
+  // Handle events
+  for (int i = 0; i < n_events; i++) {
+    logger(LOG_DEBUG, "handle_epoll_events()", "handling event no. %d", i + 1);
+
+    struct epoll_event curr_epoll_event = loop->epoll_events[i];
+    loop_event_t *curr_event = curr_epoll_event.data.ptr;
+
+    // Check if event still exists. Could have been destroyed due to prev
+    // event
+    int curr_event_idx = -1;
+    for (int i = 0; i < loop->events.length; i++) {
+      if (loop->events.data[i] == curr_event) {
+        curr_event_idx = i;
+        break;
+      }
+    }
+
+    // Above can be optimized using an RB tree
+
+    if (curr_event_idx == -1) {
+      logger(LOG_DEBUG, "handle_epoll_events()", "event not found. skipping");
+      continue;
+    }
+
+    // Close event
+    if (curr_epoll_event.events & (EPOLLERR | EPOLLHUP)) {
+      logger(LOG_DEBUG, "handle_epoll_events()", "EVENT / close");
+      if (curr_event->close_cb != NULL) {
+        // Pass the ptr from loop_event_t as a parameter to the callback
+        curr_event->close_cb(curr_event->ptr);
+        continue;
+      }
+    }
+
+    // Read event
+    if (curr_epoll_event.events & EPOLLIN) {
+      logger(LOG_DEBUG, "handle_epoll_events()", "EVENT / read");
+      if (curr_event->read_cb != NULL)
+        // Pass the ptr from loop_event_t as a parameter to the callback
+        curr_event->read_cb(curr_event->ptr);
+    }
+
+    // Write event
+    if (curr_epoll_event.events & EPOLLOUT) {
+      logger(LOG_DEBUG, "handle_epoll_events()", "EVENT / write");
+      if (curr_event->write_cb != NULL)
+        // Pass the ptr from loop_event_t as a parameter to the callback
+        curr_event->write_cb(curr_event->ptr);
+    }
+  }
 }

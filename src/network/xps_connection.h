@@ -8,12 +8,9 @@ struct xps_connection_s {
   int sock_fd;
   xps_listener_t *listener;
   char *remote_ip;
-  xps_buffer_list_t *write_buff_list;
 
-  bool read_ready;
-  bool write_ready;
-  xps_handler_t send_handler;
-  xps_handler_t recv_handler;
+  xps_pipe_source_t *source;
+  xps_pipe_sink_t *sink;
 };
 
 xps_connection_t *xps_connection_create(xps_core_t *core, int sock_fd);
