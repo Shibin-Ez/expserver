@@ -1,4 +1,5 @@
 #include "xps_listener.h"
+#include "xps_upstream.h"
 
 // Function declaration for read callback of listener
 void listener_connection_handler(void *ptr);
@@ -146,9 +147,27 @@ void listener_connection_handler(void *ptr) {
     }
     client->listener = listener;
 
-    // Create Pipe instance
-    xps_pipe_t *pipe = xps_pipe_create(listener->core, DEFAULT_PIPE_BUFFER_SIZE,
-                                       client->source, client->sink);
+    // Temp
+    if (listener->port == 8001) {
+      /* create upstream connection */
+      xps_connection_t *connection =
+          xps_upstream_create(listener->core, "127.0.0.1", UPSTREAM_PORT);
+
+      /*create pipe connection to  client source and upstream sink for the
+       * listener*/
+      xps_pipe_create(listener->core, DEFAULT_PIPE_BUFFER_THRESHOLD,
+                      client->source, connection->sink);
+
+      /*create pipe a connection to upstream source and client sink for the
+       * listener*/
+      xps_pipe_create(listener->core, DEFAULT_PIPE_BUFFER_THRESHOLD,
+                      connection->source, client->sink);
+    } else {
+      // Create Pipe instance
+      xps_pipe_t *pipe =
+          xps_pipe_create(listener->core, DEFAULT_PIPE_BUFFER_THRESHOLD,
+                          client->source, client->sink);
+    }
 
     logger(LOG_INFO, "xps_listener_connection_handler()", "new connection");
   }
