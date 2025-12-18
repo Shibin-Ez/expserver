@@ -147,7 +147,7 @@ void listener_connection_handler(void *ptr) {
     }
     client->listener = listener;
 
-    // Temp
+    // Handle connection based on port
     if (listener->port == 8001) {
       /* create upstream connection */
       xps_connection_t *connection =
@@ -162,6 +162,10 @@ void listener_connection_handler(void *ptr) {
        * listener*/
       xps_pipe_create(listener->core, DEFAULT_PIPE_BUFFER_THRESHOLD,
                       connection->source, client->sink);
+    } else if (listener->port == 8002) {
+      int error;
+      xps_file_t *file = xps_file_create(listener->core, "public/sample.txt", &error);
+      xps_pipe_create(file->core, DEFAULT_PIPE_BUFFER_THRESHOLD, file->source, client->sink);
     } else {
       // Create Pipe instance
       xps_pipe_t *pipe =
