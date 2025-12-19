@@ -5,8 +5,7 @@ void handle_epoll_events(xps_loop_t *loop, int n_events);
 bool handle_pipes(xps_loop_t *loop);
 void filter_nulls(xps_core_t *core);
 
-loop_event_t *loop_event_create(u_int fd, void *ptr, xps_handler_t read_cb,
-                                xps_handler_t write_cb,
+loop_event_t *loop_event_create(u_int fd, void *ptr, xps_handler_t read_cb, xps_handler_t write_cb,
                                 xps_handler_t close_cb) {
   assert(ptr != NULL);
 
@@ -105,14 +104,12 @@ void xps_loop_destroy(xps_loop_t *loop) {
  * @param read_cb : Callback function to be called on a read event
  * @return : OK on success and E_FAIL on error
  */
-int xps_loop_attach(xps_loop_t *loop, u_int fd, int event_flags, void *ptr,
-                    xps_handler_t read_cb, xps_handler_t write_cb,
-                    xps_handler_t close_cb) {
+int xps_loop_attach(xps_loop_t *loop, u_int fd, int event_flags, void *ptr, xps_handler_t read_cb,
+                    xps_handler_t write_cb, xps_handler_t close_cb) {
   assert(loop != NULL);
   assert(ptr != NULL);
 
-  loop_event_t *loop_event =
-      loop_event_create(fd, ptr, read_cb, write_cb, close_cb);
+  loop_event_t *loop_event = loop_event_create(fd, ptr, read_cb, write_cb, close_cb);
 
   if (loop_event == NULL) {
     return E_FAIL;
@@ -123,8 +120,7 @@ int xps_loop_attach(xps_loop_t *loop, u_int fd, int event_flags, void *ptr,
   ep_event.data.ptr = loop_event;
 
   if (epoll_ctl(loop->epoll_fd, EPOLL_CTL_ADD, fd, &ep_event) == -1) {
-    logger(LOG_ERROR, "xps_loop_attach()", "epoll_ctl() failed to attach fd %d",
-           fd);
+    logger(LOG_ERROR, "xps_loop_attach()", "epoll_ctl() failed to attach fd %d", fd);
     perror("Error message");
   }
 
@@ -155,8 +151,7 @@ int xps_loop_detach(xps_loop_t *loop, u_int fd) {
 
       // detach fd from epoll
       if (epoll_ctl(loop->epoll_fd, EPOLL_CTL_DEL, fd, NULL) == -1) {
-        logger(LOG_ERROR, "xps_loop_detach()",
-               "epoll_ctl() failed to detach fd %d", fd);
+        logger(LOG_ERROR, "xps_loop_detach()", "epoll_ctl() failed to detach fd %d", fd);
         perror("Error message");
       }
 
@@ -183,8 +178,7 @@ void xps_loop_run(xps_loop_t *loop) {
       timeout = 0;
 
     logger(LOG_DEBUG, "xps_loop_run()", "epoll wait");
-    int n_events = epoll_wait(loop->epoll_fd, loop->epoll_events,
-                              MAX_EPOLL_EVENTS, timeout);
+    int n_events = epoll_wait(loop->epoll_fd, loop->epoll_events, MAX_EPOLL_EVENTS, timeout);
     logger(LOG_DEBUG, "xps_loop_run()", "epoll wait over");
 
     if (n_events < 0)
@@ -214,8 +208,7 @@ bool handle_pipes(xps_loop_t *loop) {
     }
 
     /*Pipe has source AND source is ready AND pipe is writable*/
-    if (pipe->source && pipe->source->ready == true &&
-        xps_pipe_is_writable(pipe)) {
+    if (pipe->source && pipe->source->ready == true && xps_pipe_is_writable(pipe)) {
       // call connection_source_handler to write into  pipe
       pipe->source->handler_cb(pipe->source);
     }
@@ -247,8 +240,7 @@ bool handle_pipes(xps_loop_t *loop) {
     }
 
     /*Pipe has source AND source is ready AND pipe is writable*/
-    if (pipe->source && pipe->source->ready == true &&
-        xps_pipe_is_writable(pipe)) {
+    if (pipe->source && pipe->source->ready == true && xps_pipe_is_writable(pipe)) {
       return true;
     }
 
@@ -289,6 +281,11 @@ void filter_nulls(xps_core_t *core) {
   if (core->n_null_pipes > DEFAULT_NULLS_THRESH) {
     vec_filter_null(&core->pipes);
     core->n_null_pipes = 0;
+  }
+
+  if (core->n_null_sessions > DEFAULT_NULLS_THRESH) {
+    vec_filter_null(&core->sessions);
+    core->n_null_sessions = 0;
   }
 }
 

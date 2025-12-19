@@ -20,9 +20,11 @@ xps_core_t *xps_core_create() {
   vec_init(&core->listeners);
   vec_init(&core->connections);
   vec_init(&core->pipes);
+  vec_init(&core->sessions);
   core->n_null_listeners = 0;
   core->n_null_connections = 0;
   core->n_null_pipes = 0;
+  core->n_null_sessions = 0;
 
   logger(LOG_DEBUG, "xps_core_create()", "created core");
 
@@ -48,13 +50,21 @@ void xps_core_destroy(xps_core_t *core) {
   }
   vec_deinit(&core->listeners);
 
-  // Destory pipes
+  // Destory all pipes
   for (int i = 0; i < core->pipes.length; i++) {
     xps_pipe_t *pipe = core->pipes.data[i];
     if (pipe != NULL)
       xps_pipe_destroy(pipe);
   }
   vec_deinit(&core->pipes);
+
+  // Destory all sessions
+  for (int i = 0; i < core->sessions.length; i++) {
+    xps_session_t *session = core->sessions.data[i];
+    if (session != NULL)
+      xps_session_destroy(session);
+  }
+  vec_deinit(&core->sessions);
 
   /* destory loop attached to core */
   xps_loop_destroy(core->loop);
@@ -75,7 +85,8 @@ void xps_core_start(xps_core_t *core) {
   /* create listeners from port 8001 to 8004 */
   for (u_int port = 8001; port <= 8004; port++) {
     xps_listener_t *listener = xps_listener_create(core, "127.0.0.1", port);
-    if (listener != NULL) logger(LOG_INFO, "xps_start()", "Server listening on http://127.0.0.1:%d", port);
+    if (listener != NULL)
+      logger(LOG_INFO, "xps_start()", "Server listening on http://127.0.0.1:%d", port);
   }
 
   /* run loop instance using xps_loop_run() */

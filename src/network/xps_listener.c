@@ -4,8 +4,7 @@
 // Function declaration for read callback of listener
 void listener_connection_handler(void *ptr);
 
-xps_listener_t *xps_listener_create(xps_core_t *core, const char *host,
-                                    u_int port) {
+xps_listener_t *xps_listener_create(xps_core_t *core, const char *host, u_int port) {
   assert(host != NULL);
   assert(is_valid_port(port)); // Will be explained later
 
@@ -27,8 +26,7 @@ xps_listener_t *xps_listener_create(xps_core_t *core, const char *host,
   }
 
   // Setup listener address
-  struct addrinfo *addr_info =
-      xps_getaddrinfo(host, port); // Will be explained later
+  struct addrinfo *addr_info = xps_getaddrinfo(host, port); // Will be explained later
   if (addr_info == NULL) {
     logger(LOG_ERROR, "xps_listener_create()", "xps_getaddrinfo() failed");
     close(sock_fd);
@@ -37,8 +35,7 @@ xps_listener_t *xps_listener_create(xps_core_t *core, const char *host,
 
   // Binding to port
   if (bind(sock_fd, addr_info->ai_addr, addr_info->ai_addrlen) < 0) {
-    logger(LOG_ERROR, "xps_listener_create()", "failed to bind() to %s:%u",
-           host, port);
+    logger(LOG_ERROR, "xps_listener_create()", "failed to bind() to %s:%u", host, port);
     perror("Error message");
     freeaddrinfo(addr_info); // Will be explained later
     close(sock_fd);
@@ -57,8 +54,7 @@ xps_listener_t *xps_listener_create(xps_core_t *core, const char *host,
   // Create & allocate memory for a listener instance
   xps_listener_t *listener = malloc(sizeof(xps_listener_t));
   if (listener == NULL) {
-    logger(LOG_ERROR, "xps_listener_create()",
-           "malloc() failed for 'listener'");
+    logger(LOG_ERROR, "xps_listener_create()", "malloc() failed for 'listener'");
     close(sock_fd);
     return NULL;
   }
@@ -70,14 +66,13 @@ xps_listener_t *xps_listener_create(xps_core_t *core, const char *host,
   listener->sock_fd = sock_fd;
 
   // Attach listener to loop
-  xps_loop_attach(core->loop, sock_fd, EPOLLIN | EPOLLET, listener,
-                  listener_connection_handler, NULL, NULL);
+  xps_loop_attach(core->loop, sock_fd, EPOLLIN | EPOLLET, listener, listener_connection_handler,
+                  NULL, NULL);
 
   // Add listener to global listeners list
   vec_push(&core->listeners, listener);
 
-  logger(LOG_DEBUG, "xps_listener_create()", "created listener on port %d",
-         port);
+  logger(LOG_DEBUG, "xps_listener_create()", "created listener on port %d", port);
 
   return listener;
 }
@@ -102,8 +97,7 @@ void xps_listener_destroy(xps_listener_t *listener) {
   // Close socket
   close(listener->sock_fd);
 
-  logger(LOG_DEBUG, "xps_listener_destroy()", "destroyed listener on port %d",
-         listener->port);
+  logger(LOG_DEBUG, "xps_listener_destroy()", "destroyed listener on port %d", listener->port);
 
   // Free listener instance
   free(listener);
@@ -137,41 +131,16 @@ void listener_connection_handler(void *ptr) {
     }
 
     // Creating connection instance
-    xps_connection_t *client =
-        xps_connection_create(listener->core, conn_sock_fd);
+    xps_connection_t *client = xps_connection_create(listener->core, conn_sock_fd);
     if (client == NULL) {
-      logger(LOG_ERROR, "xps_listener_connection_handler()",
-             "xps_connection_create() failed");
+      logger(LOG_ERROR, "xps_listener_connection_handler()", "xps_connection_create() failed");
       close(conn_sock_fd);
       return;
     }
     client->listener = listener;
 
-    // Handle connection based on port
-    if (listener->port == 8001) {
-      /* create upstream connection */
-      xps_connection_t *connection =
-          xps_upstream_create(listener->core, "127.0.0.1", UPSTREAM_PORT);
-
-      /*create pipe connection to  client source and upstream sink for the
-       * listener*/
-      xps_pipe_create(listener->core, DEFAULT_PIPE_BUFFER_THRESHOLD,
-                      client->source, connection->sink);
-
-      /*create pipe a connection to upstream source and client sink for the
-       * listener*/
-      xps_pipe_create(listener->core, DEFAULT_PIPE_BUFFER_THRESHOLD,
-                      connection->source, client->sink);
-    } else if (listener->port == 8002) {
-      int error;
-      xps_file_t *file = xps_file_create(listener->core, "public/sample.txt", &error);
-      xps_pipe_create(file->core, DEFAULT_PIPE_BUFFER_THRESHOLD, file->source, client->sink);
-    } else {
-      // Create Pipe instance
-      xps_pipe_t *pipe =
-          xps_pipe_create(listener->core, DEFAULT_PIPE_BUFFER_THRESHOLD,
-                          client->source, client->sink);
-    }
+    // Create a session instance for the connection
+    xps_session_create(client->core, client);
 
     logger(LOG_INFO, "xps_listener_connection_handler()", "new connection");
   }

@@ -1,7 +1,7 @@
 #include "xps_pipe.h"
 
-xps_pipe_t *xps_pipe_create(xps_core_t *core, size_t buff_thresh,
-                            xps_pipe_source_t *source, xps_pipe_sink_t *sink) {
+xps_pipe_t *xps_pipe_create(xps_core_t *core, size_t buff_thresh, xps_pipe_source_t *source,
+                            xps_pipe_sink_t *sink) {
   assert(core != NULL);
   assert(buff_thresh > 0);
   assert(source != NULL);
@@ -40,6 +40,12 @@ xps_pipe_t *xps_pipe_create(xps_core_t *core, size_t buff_thresh,
 void xps_pipe_destroy(xps_pipe_t *pipe) {
   assert(pipe != NULL);
 
+  if (pipe->source)
+    xps_pipe_detach_source(pipe);
+
+  if (pipe->sink)
+    xps_pipe_detach_sink(pipe);
+
   /*Set NULL in 'pipes' list of core and increment n_null_pipes*/
   for (int i = 0; i < pipe->core->pipes.length; i++) {
     if (pipe == pipe->core->pipes.data[i]) {
@@ -60,9 +66,7 @@ void xps_pipe_destroy(xps_pipe_t *pipe) {
 
 bool xps_pipe_is_readable(xps_pipe_t *pipe) { return pipe->buff_list->len > 0; }
 
-bool xps_pipe_is_writable(xps_pipe_t *pipe) {
-  return pipe->buff_list->len < pipe->buff_thresh;
-}
+bool xps_pipe_is_writable(xps_pipe_t *pipe) { return pipe->buff_list->len < pipe->buff_thresh; }
 
 int xps_pipe_attach_source(xps_pipe_t *pipe, xps_pipe_source_t *source) {
   /*assert pipe and source not null*/
@@ -117,8 +121,8 @@ int xps_pipe_detach_sink(xps_pipe_t *pipe) {
     return E_FAIL;
 
   pipe->sink->pipe = NULL;
-  pipe->sink = NULL;
 
+  pipe->sink = NULL;
   return OK;
 }
 
@@ -170,8 +174,7 @@ int xps_pipe_source_write(xps_pipe_source_t *source, xps_buffer_t *buff) {
 
   /*Check if source not have a pipe*/
   if (source->pipe == NULL) {
-    logger(LOG_ERROR, "xps_pipe_source_write()",
-           "source is not attached to a pipe");
+    logger(LOG_ERROR, "xps_pipe_source_write()", "source is not attached to a pipe");
     return E_FAIL;
   }
 
@@ -184,8 +187,7 @@ int xps_pipe_source_write(xps_pipe_source_t *source, xps_buffer_t *buff) {
   // Duplicate buffer
   xps_buffer_t *dup_buff = xps_buffer_duplicate(buff);
   if (dup_buff == NULL) {
-    logger(LOG_ERROR, "xps_pipe_source_write()",
-           "xps_buffer_duplicate() failed");
+    logger(LOG_ERROR, "xps_pipe_source_write()", "xps_buffer_duplicate() failed");
     return E_FAIL;
   }
 
@@ -195,8 +197,7 @@ int xps_pipe_source_write(xps_pipe_source_t *source, xps_buffer_t *buff) {
   return OK;
 }
 
-xps_pipe_sink_t *xps_pipe_sink_create(void *ptr, xps_handler_t handler_cb,
-                                      xps_handler_t close_cb) {
+xps_pipe_sink_t *xps_pipe_sink_create(void *ptr, xps_handler_t handler_cb, xps_handler_t close_cb) {
   assert(ptr != NULL);
   assert(handler_cb != NULL);
   assert(close_cb != NULL);
@@ -207,6 +208,7 @@ xps_pipe_sink_t *xps_pipe_sink_create(void *ptr, xps_handler_t handler_cb,
     return NULL;
   }
 
+  sink->pipe = NULL;
   sink->active = false;
   sink->ready = false;
   sink->handler_cb = handler_cb;
@@ -243,8 +245,7 @@ xps_buffer_t *xps_pipe_sink_read(xps_pipe_sink_t *sink, size_t len) {
 
   /*Check if requested length is not available*/
   if (len > sink->pipe->buff_list->len) {
-    logger(LOG_ERROR, "xps_pipe_sink_read()",
-           "requested length more than available");
+    logger(LOG_ERROR, "xps_pipe_sink_read()", "requested length more than available");
     return NULL;
   }
 
@@ -263,21 +264,18 @@ int xps_pipe_sink_clear(xps_pipe_sink_t *sink, size_t len) {
 
   /*Check if sink not have a pipe*/
   if (sink->pipe == NULL) {
-    logger(LOG_ERROR, "xps_pipe_sink_clear()",
-           "sink is not attached to a pipe");
+    logger(LOG_ERROR, "xps_pipe_sink_clear()", "sink is not attached to a pipe");
     return E_FAIL;
   }
 
   /*Check whether requested length not available*/
   if (len > sink->pipe->buff_list->len) {
-    logger(LOG_ERROR, "xps_pipe_sink_clear()",
-           "requested length more than available");
+    logger(LOG_ERROR, "xps_pipe_sink_clear()", "requested length more than available");
     return E_FAIL;
   }
 
   if (xps_buffer_list_clear(sink->pipe->buff_list, len) != OK) {
-    logger(LOG_ERROR, "xps_pipe_sink_clear()",
-           "xps_buffer_list_clear() failed");
+    logger(LOG_ERROR, "xps_pipe_sink_clear()", "xps_buffer_list_clear() failed");
     return E_FAIL;
   }
 
